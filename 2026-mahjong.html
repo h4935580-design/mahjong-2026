@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>2026 麻將管理 App</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00ffe7">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  background: radial-gradient(circle at top, #0f2027, #203a43, #2c5364);
+  color: #00ffe7;
+  font-family: "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 10px;
+}
+h1 { text-align:center; margin:10px 0; }
+#summary {
+  display:flex; flex-direction:column;
+  text-align:center; gap:4px;
+}
+button {
+  width:100%; padding:12px;
+  margin:4px 0;
+  border:none; border-radius:6px;
+  background:linear-gradient(135deg,#00ffe7,#007cf0);
+  font-weight:bold;
+}
+#monthBar { text-align:center; margin:10px 0; }
+#calendar {
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px;
+}
+.day {
+  border:1px solid #00ffe7;
+  min-height:110px;
+  padding:6px;
+  background:rgba(0,0,0,0.4);
+  position:relative;
+}
+.day .profit {
+  position:absolute;
+  right:6px; bottom:6px;
+  font-weight:bold;
+}
+.win { color:#00ff7f; }
+.lose { color:#ff4d4d; }
+
+#modal {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.7);
+  align-items:flex-end;
+}
+#modalContent {
+  background:#000;
+  width:100%;
+  padding:16px;
+  border-radius:16px 16px 0 0;
+}
+input,select {
+  width:100%;
+  padding:10px;
+  margin-bottom:8px;
+  background:#000;
+  color:#00ffe7;
+  border:1px solid #00ffe7;
+}
+</style>
+</head>
+
+<body>
+
+<h1>2026 麻將管理 App</h1>
+
+<div id="summary">
+  <div>總贏：<span id="totalWin">0</span></div>
+  <div>總輸：<span id="totalLose">0</span></div>
+  <div>淨額：<span id="net">0</span></div>
+</div>
+
+<button onclick="exportJSON()">匯出 JSON</button>
+<button onclick="importJSON()">匯入 JSON</button>
+
+<div id="monthBar">
+  <button onclick="prevMonth()">⬅️</button>
+  <span id="monthTitle"></span>
+  <button onclick="nextMonth()">➡️</button>
+</div>
+
+<div id="calendar"></div>
+
+<canvas id="monthChart" height="220"></canvas>
+
+<div id="modal">
+  <div id="modalContent">
+    <h3 id="modalDate"></h3>
+    <select id="chips">
+      <option>30/10</option>
+      <option>50/20</option>
+      <option>100/20</option>
+    </select>
+    <input id="place" placeholder="地點">
+    <input id="rounds" type="number" placeholder="打了幾將">
+    <input id="profit" type="number" placeholder="贏(+)/輸(-)">
+    <button onclick="saveData()">儲存</button>
+    <button onclick="closeModal()">取消</button>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = "mahjong2026";
+const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+function saveToStorage() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+let currentYear = 2026;
+let currentMonth = 0;
+let currentDate = "";
+let chart;
+
+function buildCalendar() {
+  calendar.innerHTML = "";
+  monthTitle.innerText = `${currentYear} 年 ${currentMonth+1} 月`;
+  const days = new Date(currentYear, currentMonth+1, 0).getDate();
+
+  for (let i=1;i<=days;i++){
+    const date = `${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(i).padStart(2,"0")}`;
+    const d = document.createElement("div");
+    d.className="day";
+    d.onclick=()=>openModal(date);
+    d.innerHTML=`<div>${i}</div>`;
+    if(data[date]){
+      const p=data[date].profit;
+      d.innerHTML+=`<div class="profit ${p>=0?'win':'lose'}">${p}</div>`;
+    }
+    calendar.appendChild(d);
+  }
+  updateSummary();
+  updateChart();
+}
+
+function prevMonth(){ if(currentMonth>0){currentMonth--;buildCalendar();}}
+function nextMonth(){ if(currentMonth<11){currentMonth++;buildCalendar();}}
+
+let startX=0;
+calendar.addEventListener("touchstart",e=>startX=e.touches[0].clientX);
+calendar.addEventListener("touchend",e=>{
+  const diff=e.changedTouches[0].clientX-startX;
+  if(diff>50)prevMonth();
+  if(diff<-50)nextMonth();
+});
+
+function openModal(date){
+  currentDate=date;
+  modalDate.innerText=date;
+  const d=data[date]||{};
+  chips.value=d.chips||"30/10";
+  place.value=d.place||"";
+  rounds.value=d.rounds||"";
+  profit.value=d.profit||"";
+  modal.style.display="flex";
+}
+function closeModal(){ modal.style.display="none"; }
+function saveData(){
+  data[currentDate]={
+    chips:chips.value,
+    place:place.value,
+    rounds:+rounds.value,
+    profit:+profit.value
+  };
+  saveToStorage();
+  closeModal();
+  buildCalendar();
+}
+
+function updateSummary(){
+  let w=0,l=0;
+  Object.values(data).forEach(d=>{
+    if(d.profit>0)w+=d.profit;
+    else l+=d.profit;
+  });
+  totalWin.innerText=w;
+  totalLose.innerText=l;
+  net.innerText=w+l;
+}
+
+function updateChart(){
+  let w=0,l=0;
+  Object.keys(data).forEach(d=>{
+    const [y,m]=d.split("-");
+    if(+y===currentYear && +m===currentMonth+1){
+      const p=data[d].profit;
+      if(p>0)w+=p; else l+=p;
+    }
+  });
+  if(chart)chart.destroy();
+  chart=new Chart(monthChart,{
+    type:"bar",
+    data:{
+      labels:["總贏","總輸","淨額"],
+      datasets:[{data:[w,Math.abs(l),w+l]}]
+    },
+    options:{plugins:{legend:{display:false}}}
+  });
+}
+
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="mahjong2026.json";
+  a.click();
+}
+function importJSON(){
+  const i=document.createElement("input");
+  i.type="file";
+  i.onchange=e=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      Object.assign(data,JSON.parse(r.result));
+      saveToStorage();
+      buildCalendar();
+    };
+    r.readAsText(e.target.files[0]);
+  };
+  i.click();
+}
+
+buildCalendar();
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+</body>
+</html>
